@@ -58,7 +58,8 @@ def test(paxos_pid) do
         proposals: %MapSet{},
         processes: processes,
         timedout: 5000,
-        decided: nil
+        decided: false,
+        quorums: 0 # counter for processes in a quorum for majority
       }
       run(state)
     end
@@ -67,12 +68,21 @@ def test(paxos_pid) do
     # run stuff
     state = receive do
       {:leader_elect, first_elem} ->
-        # called by leader_election.ex to tell parent process which process is leader
+          # called by leader_election.ex to tell parent process which process is leader
 
-        state = %{state | leader: first_elem}
-        # b is the current ballot being proposed!
-        Util.beb_broadcast(state.participants, {:prepare, state.bal+1})
-        state
+          state = %{state | leader: first_elem}
+          # b is the current ballot being proposed!
+          Util.beb_broadcast(state.participants, {:prepare, state.bal})
+          state
+
+      {:broadcast} ->
+         if state.name == state.leader do
+            Util.beb_broadcast(state.participants, {:prepare, state.bal})
+            state = %{state | proposals: MapSet.put(state.proposals, value)}
+            state
+         else
+           state
+         end
 
       {:prepare, b} ->
         # if b > bal then
@@ -82,32 +92,44 @@ def test(paxos_pid) do
         # send (nack, b) to p
 
         if b > state.bal do
-          state = %{state | bal: b}
-          Util.unicast(state.leader, {:prepared, b, a_bal, a_val})
-          state
+            state = %{state | bal: b}
+            send(state.leader, {:prepared, state.b, state.a_bal, state.a_val})
+            state
         else
-          Util.unicast(state.leader, {:nack, b})
-          state
+            send(state.leader, {:nack, b})
+            state
         end
-
-        state
 
       {:prepared, b, a_bal, a_val} ->
         # If all a_val = null:
           # V= v0;
-        # else
+        # else,
           # V := a_val with the highest a_bal in S;
         # Broadcast (accept, b, V)
 
-        if a_val == null do
-          state = %{state | v: v}
-          state
+        # Await all responce after 5 sec
 
+        state = %{state | quorums: state.quorums+1}
+        if state.name == state.leader do
+            if state.quorums > (state.participants/2+1) do
+                if a_val == null do
+                    state = %{state | v: Enum.at{state.proposals, 0}}
+                    state = %{state | quorums: 0}
+                    state
+                else
+                    state = %{state | v: a_bal}
+                    state = %{state | quorums: 0}
+                    state
+                end
+            else
+                state
+            end
         else
-
-
+            state
         end
-        Util.beb_broadcast(state.participants, {:accept, b, v})
+
+
+        Util.beb_broadcast(state.participants, {:accept, b, state.v})
         state
 
       {:accept, b, v} ->
@@ -119,25 +141,47 @@ def test(paxos_pid) do
           # send (nack, b) to p
 
         if b > state.bal do
-          state = %{state | bal: b}
-          state = %{state | a_bal: b}
-          state = %{state | a_val: v}
-          Util.unicast(state.leader, {:accepted, b})
-          state
+            state = %{state | bal: b}
+            state = %{state | a_bal: b}
+            state = %{state | a_val: v}
+            send(state.leader, {:accepted, b})
+            state
         else
-          Util.unicast(state.leader, {:back, b})
+            send(state.leader, {:nack, b})
+            state
         end
 
-        state
-
       {:accepted, b} ->
+        # a value has been accepted and will be sent to the parent (application)
 
-        state
+        if state.name == state.leader do
+            if state.quorums > (state.participants/2+1) do
+                state = %{state | decided: true}
+                Util.unicast(state.parent_name, {:decision, state.v})
+                state = %{state | quorums: 0}
+                state
+            else
+                state
+            end
+        else
+            state
+        end
 
       {:nack, b} ->
         # abort?!
 
-        state
+        if state.name == state.leader do
+            Util.unicast(state.parent_name, {:nack, b})
+            state
+        else
+           state
+        end
+
+      {:timeout, b} ->
+        # timedout!
+
+          Util.unicast(state.parent_name, {:timeout, b})
+          state
 
     end
    end
