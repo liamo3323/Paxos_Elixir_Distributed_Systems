@@ -33,29 +33,105 @@ def test(paxos_pid) do
 
       pid_pax = spawn(Paxos, :init, [name, participant])
 
-      case :global.re_register_name(name, pid) do
-          :yes -> pid
-          :no  -> :error
-      end
-      IO.puts "registered #{name}"
-      pid
+      # case :global.re_register_name(name, pid) do
+      #     :yes -> pid
+      #     :no  -> :error
+      # end
+      # IO.puts "registered #{name}"
+      # pid
+
+      Utils.register_name(name, pid)
 
     end
 
-   def init(name, processes) do
+    def init(name, participants) do
 
-    state = %{
-      name: name,
-      processes: processes,
-      timedout: timedout,
-      aborted: aborted,
-      decided: decided
-    }
-    run(state)
-   end
+      state = %{
+        name: name,
+        participants: participants,
+        leader: nil, # leader process is updated in :leader_elect
+        bal: 0, # the current ballot [a number]
+        a_bal: nil, # accepted ballot
+        a_val: nil, # accepted ballot value
+        v: nil, # proposed value
+        proposals: %MapSet{},
+        processes: processes,
+        timedout: 5000,
+        decided: nil
+      }
+      run(state)
+    end
 
    def run(state)
     # run stuff
+    state = receive do
+      {:leader_elect, first_elem} ->
+        # called by leader_election.ex to tell parent process which process is leader
+
+        state = %{state | leader: first_elem}
+        # b is the current ballot being proposed!
+        Util.beb_broadcast(state.participants, {:prepare, state.bal+1})
+        state
+
+      {:prepare, b} ->
+        # if b > bal then
+        # bal := b
+        # send (prepared, b, a_bal, a_val) to p
+        # else
+        # send (nack, b) to p
+
+        if b > state.bal do
+          state = %{state | bal: b}
+          Util.unicast(state.leader, {:prepared, b, a_bal, a_val})
+          state
+        else
+          Util.unicast(state.leader, {:nack, b})
+          state
+        end
+
+        state
+
+      {:prepared, b, a_bal, a_val} ->
+        # If all a_val = null:
+          # V= v0;
+        # else
+          # V := a_val with the highest a_bal in S;
+        # Broadcast (accept, b, V)
+
+
+
+        state
+
+      {:accept, b, v} ->
+        # if b ≥ bal then
+          # bal := b
+          # (a_bal, a_val) := (b, v)
+          # send (accepted, b) to p
+        # else
+          # send (nack, b) to p
+
+        if b > state.bal do
+          state = %{state | bal: b}
+          state = %{state | a_bal: b}
+          state = %{state | a_val: v}
+          Util.unicast(state.leader, {:accepted, b})
+          state
+        else
+          Util.unicast(state.leader, {:back, b})
+        end
+
+        state
+
+      {:accepted, b} ->
+
+        state
+
+      {:nack, b} ->
+        # abort?!
+
+        state
+
+    end
    end
 
    def get_decision(pid, inst, t) do
