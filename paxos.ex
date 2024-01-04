@@ -48,6 +48,7 @@ def test(paxos_pid) do
 
       state = %{
         name: name,
+        parent_name: Utils.add_to_name(name, "_Application"),
         participants: participants,
         leader: nil, # leader process is updated in :leader_elect
         bal: 0, # the current ballot [a number]
@@ -98,8 +99,15 @@ def test(paxos_pid) do
           # V := a_val with the highest a_bal in S;
         # Broadcast (accept, b, V)
 
+        if a_val == null do
+          state = %{state | v: v}
+          state
+
+        else
 
 
+        end
+        Util.beb_broadcast(state.participants, {:accept, b, v})
         state
 
       {:accept, b, v} ->
