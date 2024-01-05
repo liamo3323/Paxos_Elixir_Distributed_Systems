@@ -58,7 +58,7 @@ def test(paxos_pid) do
         your_proposal: nil, # proposal
         other_proposal: nil, # my backup
         instance_decision: %{},
-        instance: nil,
+        instance_num: nil,
         processes: processes,
         timedout: 5000,
         decided: false,
@@ -78,8 +78,10 @@ def test(paxos_pid) do
           Util.beb_broadcast(state.participants, {:prepare, state.bal})
           state
 
-      {:broadcast} ->
-
+      {:broadcast, inst, value, t} ->
+        state = %{state | timeout: t}
+        state = %{state | instance_num: inst}
+        state = %{state | your_proposal: value}
         Util.beb_broadcast(state.particpants, {:share_proposal, your_proposal})
          if state.name == state.leader do
             Util.beb_broadcast(state.participants, {:prepare, state.bal})
@@ -183,7 +185,7 @@ def test(paxos_pid) do
         end
 
       {:instance_decision, decision} ->
-        state = %{state | instance_decision: MapSet.put(state.instance_decision, state.instance, v)}
+        state = %{state | instance_decision: MapSet.put(state.instance_decision_num, state.instance, v)}
         state
 
       {:nack, b} ->
@@ -211,14 +213,19 @@ def test(paxos_pid) do
      # return v != nil if v is the value decided by consensus instance inst
      # return nil in all other cases
 
+     # 1 - internal used by paxos?
+
+     # 2 - external: used by app
+
    end
 
    def propose(pid, inst, value, t) do
-    # do paxos stuff
 
     # is a function that takes the process identifier
     # pid of an Elixir process running a Paxos replica, an instance identifier inst, a timeout t
     # in milliseconds, and proposes a value value for the instance of consensus associated
     # with inst. The values returned by this function must comply with the following
+
+    send(pid, {:broadcast, inst, value, t})
 
   end
