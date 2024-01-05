@@ -55,7 +55,10 @@ def test(paxos_pid) do
         a_bal: nil, # accepted ballot
         a_val: nil, # accepted ballot value
         v: nil, # proposed value
-        proposals: %MapSet{},
+        your_proposal: nil, # proposal
+        other_proposal: nil, # my backup
+        instance_decision: %{},
+        instance: nil,
         processes: processes,
         timedout: 5000,
         decided: false,
@@ -76,6 +79,8 @@ def test(paxos_pid) do
           state
 
       {:broadcast} ->
+
+        Util.beb_broadcast(state.particpants, {:share_proposal, your_proposal})
          if state.name == state.leader do
             Util.beb_broadcast(state.participants, {:prepare, state.bal})
             state = %{state | proposals: MapSet.put(state.proposals, value)}
@@ -84,12 +89,21 @@ def test(paxos_pid) do
            state
          end
 
-      {:prepare, b} ->
+      {:share_proposal, proposal} ->
+        if state.your_proposal == nil do
+          state = %{state | your_proposal: proposal}
+          state
+        else
+          state = %{state | other_proposal: proposal}
+          state
+        end
+
+      {:prepare, b, leader_id} ->
         # if b > bal then
-        # bal := b
-        # send (prepared, b, a_bal, a_val) to p
+          # bal := b
+          # send (prepared, b, a_bal, a_val) to p
         # else
-        # send (nack, b) to p
+          # send (nack, b) to p
 
         if b > state.bal do
             state = %{state | bal: b}
@@ -113,7 +127,7 @@ def test(paxos_pid) do
         if state.name == state.leader do
             if state.quorums > (state.participants/2+1) do
                 if a_val == null do
-                    state = %{state | v: Enum.at{state.proposals, 0}}
+                    state = %{state | v: state.your_proposal}
                     state = %{state | quorums: 0}
                     state
                 else
@@ -157,6 +171,7 @@ def test(paxos_pid) do
         if state.name == state.leader do
             if state.quorums > (state.participants/2+1) do
                 state = %{state | decided: true}
+                Util.beb_broadcast(state.participants, {:instance_decision, state.v})
                 Util.unicast(state.parent_name, {:decision, state.v})
                 state = %{state | quorums: 0}
                 state
@@ -166,6 +181,10 @@ def test(paxos_pid) do
         else
             state
         end
+
+      {:instance_decision, decision} ->
+        state = %{state | instance_decision: MapSet.put(state.instance_decision, state.instance, v)}
+        state
 
       {:nack, b} ->
         # abort?!
@@ -202,32 +221,4 @@ def test(paxos_pid) do
     # in milliseconds, and proposes a value value for the instance of consensus associated
     # with inst. The values returned by this function must comply with the following
 
-        if state.timedout do
-        {:timeout}
-
-        # must be returned if the attempt to reach agreement initiated by
-        # this propose call was unable to either decide or abort before the expiration of the
-        # specified timeout t. This may happen e.g., if the Paxos process associated with
-        # pid has crashed
-
-        else
-
-          if state.aborted do
-          {:abort}
-
-        # must be returned if an attempt to reach an agreement initiated by
-        # this propose call was interrupted by another concurrent attempt with a higher
-        # ballot. In this case, an application implemented on top of Paxos may choose to
-        # reissue propose for this instance (e.g., if the invoking process is still considered
-        # a leader).
-
-          else
-          {:decide, state.decided}
-
-        # must be returned if the value v has been decided for the
-        # instance inst. Note that v ≠ value is possible if a competing agreement
-        # attempt was able to decide v ahead of the attempt initiated by this propose call.
-
-          end
-    end
-end
+  end
