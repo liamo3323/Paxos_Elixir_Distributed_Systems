@@ -1,5 +1,5 @@
 # Replace with your own implementation source files
-IEx.Helpers.c "util.ex", "."
+IEx.Helpers.c "utils.ex", "."
 IEx.Helpers.c "paxos.ex", "."
 IEx.Helpers.c "leader_election.ex", "."
 

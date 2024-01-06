@@ -45,6 +45,8 @@
 
     def init(name, participants) do
 
+      leader = Leader_election.start(name, participants)
+
       state = %{
         name: name, # name of the process
         parent_name: Utils.add_to_name(name, "_Application"), # parent process application name
@@ -53,6 +55,7 @@
         bal: 0, # the current ballot [a number]
         a_bal: nil, # accepted ballot
         a_val: nil, # accepted ballot value
+        v: nil,
         your_proposal: nil, # proposal
         other_proposal: nil, # my backup
         instance_decision: %{}, # Map{instance_num -> decision [proposed value]}
@@ -69,18 +72,31 @@
     # run stuff
       state = receive do
         {:leader_elect, first_elem} ->
-            # called by leader_election.ex to tell parent process which process is leader
-            state = %{state | leader: first_elem}
-            state
+            IO.puts("#{state.name} - Leader #{first_elem} is the new leader!")
+          # called by leader_election.ex to tell parent process which process is leader
+          state = %{state | leader: first_elem}
+          if state.your_proposal != nil do
+            Utils.beb_broadcast(state.participants, {:leader_broadcast, state.instance_num, state.your_proposal, state.timedout})
+          end
+          state
 
         {:leader_broadcast, inst, value, t} ->
-          send(state.leader, {:broadcast, inst, value, t})
+          state = %{state | timedout: t, instance_num: inst, your_proposal: value}
+          IO.puts("#{state.name} - has something to propose to the leader! ")
+          if state.leader != nil do
+              IO.puts("#{state.name} - A process has proposed something to #{state.leader}!")
+            Utils.unicast(state.leader, {:broadcast, inst, value, t})
+          else
+            IO.puts("#{state.name} - Does not know the leader! ")
+          end
+          state
+
 
         {:broadcast, inst, value, t} ->
-          state = %{state | timeout: t, instance_num: inst, your_proposal: value}
-          Util.beb_broadcast(state.particpants, {:share_proposal, state.your_proposal})
+          Utils.beb_broadcast(state.participants, {:share_proposal, state.your_proposal})
           if state.name == state.leader do
-              Util.beb_broadcast(state.participants, {:prepare, state.bal})
+                IO.puts("#{state.name} - #{state.leader} has started a ballot! ")
+              Utils.beb_broadcast(state.participants, {:prepare, state.bal})
               state
           else
             state
@@ -97,26 +113,30 @@
 
         {:prepare, b} ->
           if b+1 > state.bal do
+                IO.puts("#{state.name} - #{state.name} has sent a prepared to leader! ")
               state = %{state | bal: b}
-              send(state.leader, {:prepared, state.b, state.a_bal, state.a_val})
+              Utils.unicast(state.leader, {:prepared, state.bal, state.a_bal, state.a_val})
               state
           else
-              send(state.leader, {:nack, b})
+                IO.puts("NACK SENT")
+              Utils.unicast(state.leader, {:nack, b})
               state
           end
 
         {:prepared, b, a_bal, a_val} ->
           state = %{state | quorums: state.quorums+1}
           if state.name == state.leader do
-              if state.quorums > (state.participants/2+1) do
+              if state.quorums > (length(state.participants)/2+1) do
+                  IO.puts("#{state.name} - Quorum Met! ")
                   if a_val == nil do
-                      state = %{state | v: state.your_proposal, quorum: 0}
+                      state = %{state | v: state.your_proposal, quorums: 0}
                       state
                   else
                       state = %{state | v: a_val, quorums: 0}
                       state
                   end
-                  Util.beb_broadcast(state.participants, {:accept, b, state.v})
+                    IO.puts("#{state.name} - #{state.name} has sent to participants to accept #{state.v}")
+                  Utils.beb_broadcast(state.participants, {:accept, b, state.v})
                   state
               else
                   state
@@ -130,20 +150,23 @@
 
         {:accept, b, v} ->
           if b > state.bal do
+                IO.puts("#{state.name} - #{state.name} has accepted #{b}")
               state = %{state | bal: b, a_bal: b, a_val: v}
-              send(state.leader, {:accepted, b})
+              Utils.unicast(state.leader, {:accepted, b})
               state
           else
-              send(state.leader, {:nack, b})
+                IO.puts("#{state.name} - NACK SENT")
+              Utils.unicast(state.leader, {:nack, b})
               state
           end
 
         {:accepted, b} ->
           if state.name == state.leader do
               if state.quorums > (state.participants/2+1) do
+                    IO.puts("#{state.name} - Quorum 2 Met! ")
                   state = %{state | decided: true}
-                  Util.beb_broadcast(state.participants, {:instance_decision, state.v})
-                  Util.unicast(state.parent_name, {:decision, state.v})
+                  Utils.beb_broadcast(state.participants, {:instance_decision, state.v})
+                  Utils.unicast(state.parent_name, {:decision, state.v})
                   state = %{state | quorums: 0}
                   state
               else
@@ -159,16 +182,17 @@
 
         {:nack, b} ->
           if state.name == state.leader do
-              Util.unicast(state.parent_name, {:nack, b})
+              Utils.unicast(state.parent_name, {:nack, b})
               state
           else
             state
           end
 
         {:timeout, b} ->
-            Util.unicast(state.parent_name, {:timeout, b})
+            Utils.unicast(state.parent_name, {:timeout, b})
             state
       end
+      run(state)
     end
 
 
