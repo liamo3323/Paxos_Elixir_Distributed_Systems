@@ -46,17 +46,16 @@
     def init(name, participants) do
 
       state = %{
-        name: name,
-        parent_name: Utils.add_to_name(name, "_Application"),
-        participants: participants,
+        name: name, # name of the process
+        parent_name: Utils.add_to_name(name, "_Application"), # parent process application name
+        participants: participants, # list of other processes in the network
         leader: nil, # leader process is updated in :leader_elect
         bal: 0, # the current ballot [a number]
         a_bal: nil, # accepted ballot
         a_val: nil, # accepted ballot value
-        v: nil, # proposed value
         your_proposal: nil, # proposal
         other_proposal: nil, # my backup
-        instance_decision: %{},
+        instance_decision: %{}, # Map{instance_num -> decision [proposed value]}
         instance_num: nil,
         processes: nil,
         timedout: 5000,
@@ -72,16 +71,16 @@
         {:leader_elect, first_elem} ->
             # called by leader_election.ex to tell parent process which process is leader
             state = %{state | leader: first_elem}
-            # b is the current ballot being proposed!
-            Util.beb_broadcast(state.participants, {:prepare, state.bal})
             state
+
+        {:leader_broadcast, inst, value, t} ->
+          send(state.leader, {:broadcast, inst, value, t})
 
         {:broadcast, inst, value, t} ->
           state = %{state | timeout: t, instance_num: inst, your_proposal: value}
           Util.beb_broadcast(state.particpants, {:share_proposal, state.your_proposal})
           if state.name == state.leader do
               Util.beb_broadcast(state.participants, {:prepare, state.bal})
-              state = %{state | proposals: MapSet.put(state.proposals, value)}
               state
           else
             state
@@ -96,14 +95,8 @@
             state
           end
 
-        {:prepare, b, leader_id} ->
-          # if b > bal then
-            # bal := b
-            # send (prepared, b, a_bal, a_val) to p
-          # else
-            # send (nack, b) to p
-
-          if b > state.bal do
+        {:prepare, b} ->
+          if b+1 > state.bal do
               state = %{state | bal: b}
               send(state.leader, {:prepared, state.b, state.a_bal, state.a_val})
               state
@@ -113,14 +106,6 @@
           end
 
         {:prepared, b, a_bal, a_val} ->
-          # If all a_val = null:
-            # V= v0;
-          # else,
-            # V := a_val with the highest a_bal in S;
-          # Broadcast (accept, b, V)
-
-          # Await all responce after 5 sec
-
           state = %{state | quorums: state.quorums+1}
           if state.name == state.leader do
               if state.quorums > (state.participants/2+1) do
@@ -128,7 +113,7 @@
                       state = %{state | v: state.your_proposal, quorum: 0}
                       state
                   else
-                      state = %{state | v: a_bal, quorums: 0}
+                      state = %{state | v: a_val, quorums: 0}
                       state
                   end
                   Util.beb_broadcast(state.participants, {:accept, b, state.v})
@@ -144,13 +129,6 @@
 
 
         {:accept, b, v} ->
-          # if b ≥ bal then
-            # bal := b
-            # (a_bal, a_val) := (b, v)
-            # send (accepted, b) to p
-          # else
-            # send (nack, b) to p
-
           if b > state.bal do
               state = %{state | bal: b, a_bal: b, a_val: v}
               send(state.leader, {:accepted, b})
@@ -161,8 +139,6 @@
           end
 
         {:accepted, b} ->
-          # a value has been accepted and will be sent to the parent (application)
-
           if state.name == state.leader do
               if state.quorums > (state.participants/2+1) do
                   state = %{state | decided: true}
@@ -178,12 +154,10 @@
           end
 
         {:instance_decision, decision} ->
-          state = %{state | instance_decision: MapSet.put(state.instance_decision_num, state.instance, decision)}
+          state = %{state | instance_decision: MapSet.put(state.instance_decision, state.instance, decision)}
           state
 
         {:nack, b} ->
-          # abort?!
-
           if state.name == state.leader do
               Util.unicast(state.parent_name, {:nack, b})
               state
@@ -192,10 +166,8 @@
           end
 
         {:timeout, b} ->
-          # timedout!
             Util.unicast(state.parent_name, {:timeout, b})
             state
-
       end
     end
 
@@ -214,14 +186,14 @@
 
     end
 
-    def propose(pid, inst, value, t) do
+    def propose(pid_pax, inst, value, t) do
 
       # is a function that takes the process identifier
       # pid of an Elixir process running a Paxos replica, an instance identifier inst, a timeout t
       # in milliseconds, and proposes a value value for the instance of consensus associated
       # with inst. The values returned by this function must comply with the following
 
-      send(pid, {:broadcast, inst, value, t})
+      send(pid_pax, {:leader_broadcast, inst, value, t})
 
     end
   end
