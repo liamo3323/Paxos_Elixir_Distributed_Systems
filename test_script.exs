@@ -19,7 +19,7 @@ test_suite = [
     # consisting of n processes, each one on a different node.
     # Use TestUtil.get_local_config(n) to generate a single-node configuration
     # consisting of n processes, all running on the same node.
-#     {&PaxosTest.run_simple/3, TestUtil.get_local_config(3), 10, "No failures, no concurrent ballots, 3 local procs"},
+    {&PaxosTest.run_simple/3, TestUtil.get_local_config(3), 10, "No failures, no concurrent ballots, 3 local procs"},
     {&PaxosTest.run_simple/3, TestUtil.get_dist_config(host, 3), 10, "No failures, no concurrent ballots, 3 nodes"},
 #     {&PaxosTest.run_simple/3, TestUtil.get_local_config(5), 10, "No failures, no concurrent ballots, 5 local procs"},
 

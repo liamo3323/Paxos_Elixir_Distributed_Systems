@@ -68,9 +68,8 @@
           # called by leader_election.ex to tell parent process which process is leader
           state = %{state | leader: first_elem}
           if state.name == state.leader and state.v != nil do
-            state = %{state | bal: state.bal+1}
               IO.puts("#{state.name} - has sent prepared from leader_elect!")
-            Utils.beb_broadcast(state.participants, {:prepare, state.bal, state.leader})
+            Utils.beb_broadcast(state.participants, {:prepare, state.bal+1, state.leader})
           end
           state
 
@@ -84,7 +83,8 @@
             IO.puts("#{state.name} - has updated instance_num #{inspect(instance_num)}")
           state = %{state | instance_num: instance_num}
           IO.puts("#{state.name} - has recieved a proposal of val: #{inspect(proposal)}")
-          if state.v == nil do
+          
+          state = if state.v == nil do
             state = %{state | v: proposal}
             IO.puts("#{state.name} - proposal recieved v: #{inspect(state.v)}")
             state
@@ -93,9 +93,8 @@
           end
 
           if state.name == state.leader do
-              IO.puts("#{state.name} - #{state.leader} has started a ballot! ")
-            state = %{state | bal: state.bal+1}
-            Utils.beb_broadcast(state.participants, {:prepare, state.bal, state.leader})
+              IO.puts("#{state.name} - #{state.leader} has started a ballot! b-#{inspect(state.bal)}")
+            Utils.beb_broadcast(state.participants, {:prepare, state.bal+1, state.leader})
             state
           else
             state
@@ -120,18 +119,22 @@
           state = %{state | a_val_list: state.a_val_list++[{a_bal,a_val}]}
           if state.name == state.leader do
               if state.quorums > (length(state.participants)/2+1) do
-                  IO.puts("#{state.name} - Quorum Met! #{inspect(state.quorums)}")
-                  state = if Enum.map(state.a_val_list fn acc ->  end)
+                  IO.puts("#{state.name} - Quorum Met! #{inspect(state.quorums)} state - #{inspect(state)}")
 
-                  Enum.map('abc', fn num -> 1000 + num end)
-                  [1097, 1098, 1099]
-
-                  state = if a_val == nil do
-                        IO.puts("#{state.name} - [a_val == nil] Setting v <- #{inspect(state.v)} ")
-                      state = %{state | v: state.v, quorums: 0}
-                      state
+                  state = if Enum.all?(state.a_val_list, fn {k, v} -> v == nil end) do
+                      IO.puts("#{state.name} - [a_val == nil] Setting v <- #{inspect(state.v)} ")
+                    state = %{state | v: state.v, quorums: 0}
+                    state
                   else
                         IO.puts("#{state.name} - [a_val != nil] Setting v <- #{inspect(a_val)} ")
+                      {a_bal, a_val} = Enum.reduce( state.a_val_list, {0, nil}, fn {k,v}, acc ->
+                        {acc_k, acc_v} = acc
+                        if k > acc_k and k != nil do
+                          {k,v}
+                        else
+                          {acc_k, acc_v}
+                        end
+                      end)
                       state = %{state | v: a_val, quorums: 0}
                       state
                   end
@@ -195,7 +198,7 @@
           state
 
         {:nack, b} ->
-          if state.name == state.leader do
+          if state.name == state.leader and state.parent_name != nil do
               send(state.parent_name, {:nack, b})
           end
           state
