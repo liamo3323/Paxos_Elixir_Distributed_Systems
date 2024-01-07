@@ -49,14 +49,13 @@
 
       state = %{
         name: name, # name of the process
-        parent_name: Utils.add_to_name(name, "_Application"), # parent process application name
+        parent_name: nil, # parent process application name
         participants: participants, # list of other processes in the network
         leader: nil, # leader process is updated in :leader_elect
         bal: 0, # the current ballot [a number]
         a_bal: nil, # accepted ballot
         a_val: nil, # accepted ballot value
-        v: nil,
-        your_proposal: nil, # proposal
+        v: nil, # proposal
         other_proposal: nil, # my backup
         instance_decision: %{}, # Map{instance_num -> decision [proposed value]}
         instance_num: nil,
@@ -75,67 +74,65 @@
             IO.puts("#{state.name} - Leader #{first_elem} is the new leader!")
           # called by leader_election.ex to tell parent process which process is leader
           state = %{state | leader: first_elem}
-          if state.your_proposal != nil do
-            Utils.beb_broadcast(state.participants, {:leader_broadcast, state.instance_num, state.your_proposal, state.timedout})
-          end
-          state
-
-        {:leader_broadcast, inst, value, t} ->
-          state = %{state | timedout: t, instance_num: inst, your_proposal: value}
-          IO.puts("#{state.name} - has something to propose to the leader! ")
-          if state.leader != nil do
-              IO.puts("#{state.name} - A process has proposed something to #{state.leader}!")
-            Utils.unicast(state.leader, {:broadcast, inst, value, t})
-          else
-            IO.puts("#{state.name} - Does not know the leader! ")
-          end
-          state
-
-
-        {:broadcast, inst, value, t} ->
-          Utils.beb_broadcast(state.participants, {:share_proposal, state.your_proposal})
           if state.name == state.leader do
-                IO.puts("#{state.name} - #{state.leader} has started a ballot! ")
-              Utils.beb_broadcast(state.participants, {:prepare, state.bal})
-              state
-          else
-            state
+            state = %{state | bal: state.bal+1}
+              IO.puts("#{state.name} - has sent prepared from leader_elect!")
+            Utils.beb_broadcast(state.participants, {:prepare, state.bal})
           end
+          state
 
-        {:share_proposal, proposal} ->
-          if state.your_proposal == nil do
-            state = %{state | your_proposal: proposal}
+        {:broadcast, inst, value, t, parent_process} ->
+          state = %{state | timedout: t, instance_num: inst, v: value, parent_name: parent_process}
+            IO.puts("#{state.name} - with #{inst} has proposed #{inspect(value)} to the leader! Broad-Parent: #{inspect(state.parent_name)}")
+          Utils.beb_broadcast(state.participants, {:share_proposal, state.v, state.instance_num})
+          if state.name == state.leader do
+              IO.puts("#{state.name} - #{state.leader} has started a ballot! ")
+            state = %{state | bal: state.bal+1}
+            Utils.beb_broadcast(state.participants, {:prepare, state.bal})
+          end
+          state
+
+        {:share_proposal, proposal, instance_num} ->
+            IO.puts("#{state.name} - has updated instance_num #{inspect(instance_num)}")
+          state = %{state | instance_num: instance_num}
+          IO.puts("#{state.name} - has recieved a proposal of val: #{inspect(proposal)}")
+          if state.v == nil do
+            state = %{state | v: proposal}
+            IO.puts("#{state.name} - propsal recieved v: #{inspect(state.v)}")
             state
           else
-            state = %{state | other_proposal: proposal}
             state
           end
 
         {:prepare, b} ->
-          if b+1 > state.bal do
-                IO.puts("#{state.name} - #{state.name} has sent a prepared to leader! ")
+          if b > state.bal do
+                IO.puts("#{state.name} - sending a prepared to leader! #{inspect(state.v)}")
               state = %{state | bal: b}
               Utils.unicast(state.leader, {:prepared, state.bal, state.a_bal, state.a_val})
               state
           else
-                IO.puts("NACK SENT")
+              IO.puts("#{inspect(state)}")
+                IO.puts("#{state.name} - NACK SENT | b:#{inspect(b)} | bal #{inspect(state.bal)}")
               Utils.unicast(state.leader, {:nack, b})
               state
           end
+          state
 
         {:prepared, b, a_bal, a_val} ->
           state = %{state | quorums: state.quorums+1}
           if state.name == state.leader do
               if state.quorums > (length(state.participants)/2+1) do
-                  IO.puts("#{state.name} - Quorum Met! ")
-                  if a_val == nil do
-                      state = %{state | v: state.your_proposal, quorums: 0}
+                  IO.puts("#{state.name} - Quorum Met! #{inspect(state.quorums)}")
+                  state = if a_val == nil do
+                        IO.puts("#{state.name} - [a_val == nil] Setting v <- #{inspect(state.v)} ")
+                      state = %{state | v: state.v, quorums: 0}
                       state
                   else
+                        IO.puts("#{state.name} - [a_val != nil] Setting v <- #{inspect(a_val)} ")
                       state = %{state | v: a_val, quorums: 0}
                       state
                   end
-                    IO.puts("#{state.name} - #{state.name} has sent to participants to accept #{state.v}")
+                    IO.puts("#{state.name} - has sent to participants to accept")
                   Utils.beb_broadcast(state.participants, {:accept, b, state.v})
                   state
               else
@@ -145,12 +142,9 @@
               state
           end
 
-
-
-
         {:accept, b, v} ->
-          if b > state.bal do
-                IO.puts("#{state.name} - #{state.name} has accepted #{b}")
+          if b >= state.bal do
+                IO.puts("#{state.name} - #{state.name} has accepted bal: #{b} | v: #{inspect(v)}")
               state = %{state | bal: b, a_bal: b, a_val: v}
               Utils.unicast(state.leader, {:accepted, b})
               state
@@ -159,38 +153,54 @@
               Utils.unicast(state.leader, {:nack, b})
               state
           end
+          state
 
         {:accepted, b} ->
           if state.name == state.leader do
-              if state.quorums > (state.participants/2+1) do
-                    IO.puts("#{state.name} - Quorum 2 Met! ")
-                  state = %{state | decided: true}
-                  Utils.beb_broadcast(state.participants, {:instance_decision, state.v})
-                  Utils.unicast(state.parent_name, {:decision, state.v})
-                  state = %{state | quorums: 0}
-                  state
-              else
-                  state
-              end
+            state = %{state | quorums: state.quorums+1}
+            if state.quorums > (length(state.participants)/2+1) do
+                  IO.puts("#{state.name} - Quorum 2 Met! cnt: #{state.quorums}")
+                state = %{state | decided: true}
+                  IO.puts("#{state.name} is sending decision #{inspect(state.v)}")
+                Utils.beb_broadcast(state.participants, {:instance_decision, state.v})
+                state = %{state | quorums: 0}
+                state
+            else
+                state
+            end
           else
               state
           end
 
         {:instance_decision, decision} ->
-          state = %{state | instance_decision: MapSet.put(state.instance_decision, state.instance, decision)}
+          state = %{state | instance_decision: Map.put(state.instance_decision, state.instance_num, decision)}
+            IO.puts("#{state.name} - Updated Map #{inspect(state.instance_decision)} | Parent: #{inspect(state.parent_name)}")
+          if state.parent_name != nil do
+              IO.puts("#{state.name} - sending to parent process #{inspect(state.parent_name)} value #{inspect(state.v)}")
+            send(state.parent_name, {:propose_responce, state.v})
+          end
+          state
+
+        {:get_decision, instance_num, t, parent_process} ->
+          IO.puts("#{state.name} - trying to print a decision num #{instance_num}")
+          if Map.get(state.instance_decision, instance_num) != nil do
+            send(parent_process, {:decision_responce, Map.get(state.instance_decision, instance_num)})
+          else
+            IO.puts("instance decision not found!")
+            send(parent_process, {:decision_responce, nil})
+          end
           state
 
         {:nack, b} ->
           if state.name == state.leader do
               Utils.unicast(state.parent_name, {:nack, b})
-              state
-          else
-            state
           end
+          state
 
         {:timeout, b} ->
             Utils.unicast(state.parent_name, {:timeout, b})
             state
+
       end
       run(state)
     end
@@ -198,16 +208,18 @@
 
 
 
-    def get_decision(pid, inst, t) do
+    def get_decision(pid_pax, inst, t) do
       # takes the process identifier pid of a process running a Paxos replica, an instance identifier inst, and a timeout t in milliseconds
 
       # return v != nil if v is the value decided by consensus instance inst
       # return nil in all other cases
 
-      # 1 - internal used by paxos?
+      send(pid_pax, {:get_decision, inst, t, self()})
 
-      # 2 - external: used by app
-
+      result = receive do {:decision_responce, v} ->
+        IO.puts("returning v in :decision_responce #{inspect(v)}")
+        v
+      end
     end
 
     def propose(pid_pax, inst, value, t) do
@@ -217,7 +229,11 @@
       # in milliseconds, and proposes a value value for the instance of consensus associated
       # with inst. The values returned by this function must comply with the following
 
-      send(pid_pax, {:leader_broadcast, inst, value, t})
+      send(pid_pax, {:broadcast, inst, value, t, self()})
 
+      result = receive do {:propose_responce, v} ->
+        IO.puts("returning v in :propose_responce #{inspect(v)}")
+        v
+      end
     end
   end

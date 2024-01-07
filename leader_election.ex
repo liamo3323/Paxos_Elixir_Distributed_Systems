@@ -31,7 +31,6 @@ defmodule Leader_election do
         timeout: 1000
       }
 
-
       Process.send_after(self(), {:timeout}, state.timeout)
 
       run(state)
