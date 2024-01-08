@@ -19,13 +19,14 @@ test_suite = [
     # consisting of n processes, each one on a different node.
     # Use TestUtil.get_local_config(n) to generate a single-node configuration
     # consisting of n processes, all running on the same node.
-    {&PaxosTest.run_simple/3, TestUtil.get_local_config(3), 10, "No failures, no concurrent ballots, 3 local procs"},
-    {&PaxosTest.run_simple/3, TestUtil.get_dist_config(host, 3), 10, "No failures, no concurrent ballots, 3 nodes"},
+#     {&PaxosTest.run_simple/3, TestUtil.get_local_config(3), 10, "No failures, no concurrent ballots, 3 local procs"},
+#     {&PaxosTest.run_simple/3, TestUtil.get_dist_config(host, 3), 10, "No failures, no concurrent ballots, 3 nodes"},
 #     {&PaxosTest.run_simple/3, TestUtil.get_local_config(5), 10, "No failures, no concurrent ballots, 5 local procs"},
 
 #     {&PaxosTest.run_simple_2/3, TestUtil.get_dist_config(host, 3), 10, "No failures, 2 concurrent ballots, 3 nodes"},
 #     {&PaxosTest.run_simple_2/3, TestUtil.get_local_config(3), 10, "No failures, 2 concurrent ballots, 3 local procs"},
 
+#! [failed]
 #     {&PaxosTest.run_simple_3/3, TestUtil.get_local_config(3), 10, "No failures, 2 concurrent instances, 3 local procs"},
 
 #     {&PaxosTest.run_simple_many_1/3, TestUtil.get_dist_config(host, 5), 10, "No failures, many concurrent ballots 1, 5 nodes"},
@@ -36,7 +37,8 @@ test_suite = [
 #     {&PaxosTest.run_simple_many_2/3, TestUtil.get_dist_config(host, 5), 10, "No failures, many concurrent ballots 2, 5 nodes"},
 #     {&PaxosTest.run_simple_many_2/3, TestUtil.get_local_config(5), 10, "No failures, many concurrent ballots 2, 5 local procs"},
 
-#     {&PaxosTest.run_non_leader_crash/3, TestUtil.get_dist_config(host, 3), 10, "One non-leader crashes, no concurrent ballots, 3 nodes"},
+#! [failed]
+    {&PaxosTest.run_non_leader_crash/3, TestUtil.get_dist_config(host, 3), 10, "One non-leader crashes, no concurrent ballots, 3 nodes"},
 #     {&PaxosTest.run_non_leader_crash/3, TestUtil.get_local_config(3), 10, "One non-leader crashes, no concurrent ballots, 3 local procs"},
 
 

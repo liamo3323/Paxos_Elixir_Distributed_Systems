@@ -83,7 +83,7 @@
             IO.puts("#{state.name} - has updated instance_num #{inspect(instance_num)}")
           state = %{state | instance_num: instance_num}
           IO.puts("#{state.name} - has recieved a proposal of val: #{inspect(proposal)}")
-          
+
           state = if state.v == nil do
             state = %{state | v: proposal}
             IO.puts("#{state.name} - proposal recieved v: #{inspect(state.v)}")
