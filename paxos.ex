@@ -332,7 +332,7 @@ defmodule Paxos do
       state = %{
         state
         | instance_state:
-            Map.put(state.instance_decision, instance_num, %{
+            Map.put(state.instance_state, instance_num, %{
               # the current ballot [a number]
               bal: 0,
               # accepted ballot
