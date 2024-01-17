@@ -65,7 +65,7 @@ defmodule Paxos do
             Enum.reduce(Map.keys(state.instance_state), 0, fn x, acc ->
               Utils.beb_broadcast(
                 state.participants,
-                {:prepare, acc, state.instance_state[x].bal + 1, state.leader}
+                {:prepare, x, state.instance_state[x].bal + 1, state.leader}
               )
             end)
           end
@@ -109,11 +109,9 @@ defmodule Paxos do
               state.participants,
               {:prepare, instance_num, state.instance_state[instance_num].bal + 1, state.leader}
             )
-
-            state
-          else
-            state
           end
+
+          state
 
         {:prepare, instance_num, b, leader_id} ->
           state = check_instance_state_exist(state, instance_num)
@@ -181,8 +179,10 @@ defmodule Paxos do
                   end
                 end)
 
-                #!
-                IO.puts("#{state.name} - prepared - #{inspect(a_val)} | state instance v #{inspect(state.instance_state[instance_num].v)}")
+              #!
+              IO.puts(
+                "#{state.name} - prepared - #{inspect(a_val)} | state instance v #{inspect(state.instance_state[instance_num].v)}"
+              )
 
               a_val =
                 if a_val == nil do
@@ -329,6 +329,7 @@ defmodule Paxos do
 
   def check_instance_state_exist(state, instance_num) do
     if state.instance_state[instance_num] == nil do
+      # IO.puts("#{state.name} - create new instance | #{inspect(instance_num)}")
       state = %{
         state
         | instance_state:
