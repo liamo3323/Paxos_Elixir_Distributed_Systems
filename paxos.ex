@@ -65,43 +65,25 @@ defmodule Paxos do
             Enum.reduce(Map.keys(state.instance_state), 0, fn x, acc ->
               Utils.beb_broadcast(
                 state.participants,
-                {:prepare, acc, state.instance_state[x].bal, state.leader}
+                {:prepare, acc, state.instance_state[x].bal + 1, state.leader}
               )
             end)
           end
 
           state
 
-        {:broadcast, instance_num, value, t, parent_process} ->
+        {:broadcast, instance_num, value, parent_process} ->
           state = %{state | parent_name: parent_process}
 
           IO.puts(
             "#{state.name} - with #{instance_num} has proposed #{inspect(value)} to the leader! "
           )
 
-          Utils.beb_broadcast(state.participants, {:share_proposal, value, instance_num, t})
+          Utils.beb_broadcast(state.participants, {:share_proposal, value, instance_num})
           state
 
-        {:share_proposal, proposal, instance_num, timeout} ->
-          state = %{
-            state
-            | instance_state:
-                Map.put(state.instance_decision, instance_num, %{
-                  # the current ballot [a number]
-                  bal: 0,
-                  # accepted ballot
-                  a_bal: nil,
-                  # accepted ballot value
-                  a_val: nil,
-                  a_val_list: [],
-                  # proposal
-                  v: nil,
-                  timeout: timeout,
-                  quorums_prepared: 0,
-                  quorums_accepted: 0
-                })
-          }
-
+        {:share_proposal, proposal, instance_num} ->
+          state = check_instance_state_exist(state, instance_num)
           IO.puts("#{state.name} - has recieved a proposal of val: #{inspect(proposal)}")
 
           state =
@@ -134,6 +116,8 @@ defmodule Paxos do
           end
 
         {:prepare, instance_num, b, leader_id} ->
+          state = check_instance_state_exist(state, instance_num)
+
           if b > state.instance_state[instance_num].bal do
             IO.puts(
               "#{state.name} - sending a prepared to leader! | leader: #{inspect(leader_id)}"
@@ -165,6 +149,8 @@ defmodule Paxos do
           end
 
         {:prepared, instance_num, b, a_bal, a_val} ->
+          state = check_instance_state_exist(state, instance_num)
+
           if state.name == state.leader and b == state.instance_state[instance_num].bal do
             state = %{
               state
@@ -194,6 +180,9 @@ defmodule Paxos do
                     {acc_k, acc_v}
                   end
                 end)
+
+                #!
+                IO.puts("#{state.name} - prepared - #{inspect(a_val)} | state instance v #{inspect(state.instance_state[instance_num].v)}")
 
               a_val =
                 if a_val == nil do
@@ -228,6 +217,8 @@ defmodule Paxos do
           end
 
         {:accept, instance_num, b, v} ->
+          state = check_instance_state_exist(state, instance_num)
+
           if b >= state.instance_state[instance_num].bal do
             IO.puts("#{state.name} - #{state.name} has accepted bal: #{b} | v: #{inspect(v)}")
 
@@ -251,6 +242,8 @@ defmodule Paxos do
           end
 
         {:accepted, instance_num, b} ->
+          state = check_instance_state_exist(state, instance_num)
+
           if state.name == state.leader do
             state = %{
               state
@@ -266,8 +259,6 @@ defmodule Paxos do
               IO.puts(
                 "#{state.name} - Quorums Accepted Met! cnt: #{state.instance_state[instance_num].quorums_accepted}"
               )
-
-              state = %{state | decided: true}
 
               IO.puts(
                 "#{state.name} is sending decision #{inspect(state.instance_state[instance_num].v)}"
@@ -296,6 +287,8 @@ defmodule Paxos do
           end
 
         {:instance_decision, instance_num, decision} ->
+          state = check_instance_state_exist(state, instance_num)
+
           state = %{
             state
             | instance_decision: Map.put(state.instance_decision, instance_num, decision)
@@ -311,12 +304,14 @@ defmodule Paxos do
 
           state
 
-        {:get_decision, instance_num, t, parent_process} ->
+        {:get_decision, instance_num, parent_process} ->
           # IO.puts("#{state.name} - trying to print a decision num #{instance_num}")
-          send(
-            parent_process,
-            {:decision_responce, Map.get(state.instance_decision, instance_num)}
-          )
+          if state.instance_decision[instance_num] != nil do
+            send(
+              parent_process,
+              {:decision_responce, state.instance_decision[instance_num]}
+            )
+          end
 
           state
 
@@ -332,23 +327,45 @@ defmodule Paxos do
     run(state)
   end
 
+  def check_instance_state_exist(state, instance_num) do
+    if state.instance_state[instance_num] == nil do
+      state = %{
+        state
+        | instance_state:
+            Map.put(state.instance_decision, instance_num, %{
+              # the current ballot [a number]
+              bal: 0,
+              # accepted ballot
+              a_bal: nil,
+              # accepted ballot value
+              a_val: nil,
+              a_val_list: [],
+              # proposal
+              v: nil,
+              quorums_prepared: 0,
+              quorums_accepted: 0
+            })
+      }
+    else
+      state
+    end
+  end
+
   def get_decision(pid_pax, inst, t) do
     # takes the process identifier pid of a process running a Paxos replica, an instance identifier inst, and a timeout t in milliseconds
 
     # return v != nil if v is the value decided by consensus instance inst
     # return nil in all other cases
 
-    Process.send_after(pid_pax, {:get_decision, inst, t, self()}, t)
+    send(pid_pax, {:get_decision, inst, self()})
     # send(pid_pax, {:get_decision, inst, t, self()})
-
-    result =
-      receive do
-        {:decision_responce, v} ->
-          # IO.puts("returning v in :decision_responce #{inspect(v)}")
-          v
-      after
-        t -> nil
-      end
+    receive do
+      {:decision_responce, v} ->
+        # IO.puts("returning v in :decision_responce #{inspect(v)}")
+        v
+    after
+      t -> nil
+    end
   end
 
   def propose(pid_pax, inst, value, t) do
@@ -356,19 +373,17 @@ defmodule Paxos do
     # pid of an Elixir process running a Paxos replica, an instance identifier inst, a timeout t
     # in milliseconds, and proposes a value value for the instance of consensus associated
     # with inst. The values returned by this function must comply with the following
+    send(pid_pax, {:broadcast, inst, value, self()})
 
-    Process.send_after(pid_pax, {:broadcast, inst, value, t, self()}, t)
+    receive do
+      {:propose_responce, v} ->
+        IO.puts("returning v in :propose_responce #{inspect(v)}")
+        v
 
-    result =
-      receive do
-        {:propose_responce, v} ->
-          IO.puts("returning v in :propose_responce #{inspect(v)}")
-          v
-
-        {:abort} ->
-          {:abort}
-      after
-        t -> {:timeout}
-      end
+      {:abort} ->
+        {:abort}
+    after
+      t -> {:timeout}
+    end
   end
 end
