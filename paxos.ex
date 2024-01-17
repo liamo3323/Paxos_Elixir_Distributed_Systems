@@ -50,24 +50,6 @@
         decided: false
       }
 
-      # state = %{
-      #   name: name, # name of the process
-      #   parent_name: nil, # parent process application name
-      #   participants: participants, # list of other processes in the network
-      #   leader: nil, # leader process is updated in :leader_elect
-      #   bal: 0, # the current ballot [a number]
-      #   a_bal: nil, # accepted ballot
-      #   a_val: nil, # accepted ballot value
-      #   a_val_list: [],
-      #   v: nil, # proposal
-      #   instance_decision: %{}, # Map{instance_num -> decision [proposed value]}
-      #   instance_num: nil,
-      #   processes: nil,
-      #   timedout: 5000,
-      #   decided: false,
-      #   quorums: 0 # counter for processes in a quorum for majority
-      # }
-
       run(state)
     end
 
@@ -78,10 +60,13 @@
             IO.puts("#{state.name} - Leader #{first_elem} is the new leader!")
           # called by leader_election.ex to tell parent process which process is leader
           state = %{state | leader: first_elem}
-          # if state.name == state.leader and state.v != nil do
-          #     IO.puts("#{state.name} - has sent prepared from leader_elect!")
-          #   Utils.beb_broadcast(state.participants, {:prepare, state.bal+1, state.leader})
-          # end
+
+          if state.name == state.leader do
+            Enum.reduce(Map.keys(state.instance_state), 0, fn x, acc ->
+              IO.puts("#{state.name} - is leader & sending prepare for each instance_num #{acc} key!")
+              Utils.beb_broadcast(state.participants, {:prepare, acc, state.instance_state[x].bal, state.leader})
+            end)
+          end
           state
 
         {:broadcast, instance_num, value, t, parent_process} ->
@@ -99,7 +84,8 @@
             a_val_list: [],
             v: nil, # proposal
             timeout: timeout,
-            quorums: 0
+            quorums_A: 0,
+            quorums_B: 0
           })}
 
           IO.puts("#{state.name} - has recieved a proposal of val: #{inspect(proposal)}")
@@ -140,9 +126,9 @@
         {:prepared, instance_num, b, a_bal, a_val} ->
           state = %{state | instance_state:
             Map.put(state.instance_state, instance_num, %{state.instance_state[instance_num]|
-            quorums: state.instance_state[instance_num].quorums+1})}
+            quorums_A: state.instance_state[instance_num].quorums_A+1})}
 
-            IO.puts("#{state.name} - Quorum: #{state.instance_state[instance_num].quorums}")
+            IO.puts("#{state.name} - Quorum_A: #{state.instance_state[instance_num].quorums_A}")
 
           state = %{state | instance_state:
             Map.put(state.instance_state, instance_num, %{state.instance_state[instance_num]|
@@ -150,15 +136,15 @@
 
 
           if state.name == state.leader do
-              if state.instance_state[instance_num].quorums >= (floor(length(state.participants)/2)+1) do
-                  IO.puts("#{state.name} -` Quorum Met! #{inspect(state.instance_state[instance_num].quorums)} state - #{inspect(state)}")
+              if state.instance_state[instance_num].quorums_A >= (floor(length(state.participants)/2)+1) do
+                  IO.puts("#{state.name} - Quorum_A Met! #{inspect(state.instance_state[instance_num].quorums_A)} state - #{inspect(state)}")
 
                   state = if Enum.all?(state.instance_state[instance_num].a_val_list, fn {k, v} -> v == nil end) do
                       IO.puts("#{state.name} - [a_val == nil] Setting v <- #{inspect(state.instance_state[instance_num].v)} ")
 
                     state = %{state | instance_state:
                       Map.put(state.instance_state, instance_num, %{state.instance_state[instance_num]|
-                      quorums: 0})}
+                      quorums_A: 0})}
 
                       #! v = v_0 <-- not sure
                     # state = %{state | instance_state:
@@ -179,7 +165,7 @@
 
                       state = %{state | instance_state:
                         Map.put(state.instance_state, instance_num, %{state.instance_state[instance_num]|
-                        quorums: 0})}
+                        quorums_A: 0})}
 
                       state = %{state | instance_state:
                         Map.put(state.instance_state, instance_num, %{state.instance_state[instance_num]|
@@ -219,17 +205,17 @@
 
             state = %{state | instance_state:
               Map.put(state.instance_state, instance_num, %{state.instance_state[instance_num]|
-              quorums: state.instance_state[instance_num].quorums+1})}
+              quorums_B: state.instance_state[instance_num].quorums_B+1})}
 
-            if state.instance_state[instance_num].quorums >= (floor(length(state.participants)/2)+1) do
-                  IO.puts("#{state.name} - Quorum 2 Met! cnt: #{state.instance_state[instance_num].quorums}")
+            if state.instance_state[instance_num].quorums_B >= (floor(length(state.participants)/2)+1) do
+                  IO.puts("#{state.name} - Quorum_B Met! cnt: #{state.instance_state[instance_num].quorums_B}")
                 state = %{state | decided: true}
                   IO.puts("#{state.name} is sending decision #{inspect(state.instance_state[instance_num].v)}")
                 Utils.beb_broadcast(state.participants, {:instance_decision, instance_num, state.instance_state[instance_num].v})
 
                 state = %{state | instance_state:
                   Map.put(state.instance_state, instance_num, %{state.instance_state[instance_num]|
-                  quorums: 0})}
+                  quorums_B: 0})}
 
                 state
             else
