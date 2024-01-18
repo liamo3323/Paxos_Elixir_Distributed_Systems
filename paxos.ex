@@ -113,12 +113,12 @@ defmodule Paxos do
 
           state
 
-        {:prepare, instance_num, b, leader_id} ->
+        {:prepare, instance_num, b, leader} ->
           state = check_instance_state_exist(state, instance_num)
 
           if b > state.instance_state[instance_num].bal do
             IO.puts(
-              "#{state.name} - sending a prepared to leader! | leader: #{inspect(leader_id)}"
+              "#{state.name} - sending a prepared to leader! | leader: #{inspect(leader)}"
             )
 
             state = %{
@@ -131,7 +131,7 @@ defmodule Paxos do
             }
 
             Utils.unicast(
-              leader_id,
+              leader,
               {:prepared, instance_num, b, state.instance_state[instance_num].a_bal,
                state.instance_state[instance_num].a_val}
             )
@@ -142,7 +142,7 @@ defmodule Paxos do
               "#{state.name} - NACK SENT | b:#{inspect(b)} | bal #{inspect(state.instance_state[instance_num].bal)}"
             )
 
-            Utils.unicast(leader_id, {:nack, b})
+            Utils.unicast(leader, {:nack, b})
             state
           end
 
@@ -205,7 +205,7 @@ defmodule Paxos do
 
               Utils.beb_broadcast(
                 state.participants,
-                {:accept, instance_num, b, state.instance_state[instance_num].v}
+                {:accept, instance_num, b, state.instance_state[instance_num].v, state.name}
               )
 
               state
@@ -216,7 +216,7 @@ defmodule Paxos do
             state
           end
 
-        {:accept, instance_num, b, v} ->
+        {:accept, instance_num, b, v, leader} ->
           state = check_instance_state_exist(state, instance_num)
 
           if b >= state.instance_state[instance_num].bal do
@@ -233,11 +233,11 @@ defmodule Paxos do
                   })
             }
 
-            Utils.unicast(state.leader, {:accepted, instance_num, b})
+            Utils.unicast(leader, {:accepted, instance_num, b})
             state
           else
             IO.puts("#{state.name} - NACK SENT")
-            Utils.unicast(state.leader, {:nack, b})
+            Utils.unicast(leader, {:nack, b})
             state
           end
 
